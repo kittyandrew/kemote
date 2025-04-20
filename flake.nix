@@ -43,7 +43,19 @@
     packages.default = craneLib.buildPackage {
       doCheck = false;
       inherit src buildInputs; # afaiu version is inherited from Cargo.toml
+
+      # @NOTE: I have no idea why this didn't just work..
       nativeBuildInputs = libraries;
+      # .. and I had to manually patch/link (?) some libraries, since they are
+      # apparently dynamically loaded (?) in some special way that default patch
+      # program does not recognize, therefore you have to force it. Sources:
+      #   - https://discourse.nixos.org/t/set-ld-library-path-globally-configuration-nix/22281/5
+      #   - https://github.com/NixOS/nixpkgs/blob/b024ced1aac25639f8ca8fdfc2f8c4fbd66c48ef/pkgs/by-name/ze/zed-editor/package.nix#L210-L211
+      postInstall = ''
+        patchelf --add-rpath ${pkgs.libxkbcommon}/lib $out/bin/kemote
+        patchelf --add-needed ${pkgs.wayland}/lib/libwayland-client.so $out/bin/kemote
+        patchelf --add-needed ${pkgs.vulkan-loader}/lib/libvulkan.so.1 $out/bin/kemote
+      '';
     };
 
     # nix develop

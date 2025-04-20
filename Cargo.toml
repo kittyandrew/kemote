@@ -1,0 +1,19 @@
+[package]
+name = "kemote"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["http_client", "font-kit", "wayland"] }
+gpui_tokio = { git = "https://github.com/zed-industries/zed" }
+util = { git = "https://github.com/zed-industries/zed" }
+reqwest_client = { git = "https://github.com/zed-industries/zed" }
+http_client = { git = "https://github.com/zed-industries/zed" }
+rand = "0.9.1"
+unicode-segmentation = "1.12.0"
+serde = "1.0.219"
+sha256 = "1.6.0"
+serde_json = "1.0.140"
+image = "0.25.6"
+wl-clipboard-rs = "0.9.2"
+futures = "0.3.31"

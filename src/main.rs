@@ -643,6 +643,8 @@ fn main() {
         // This just sets focus to the input field when the window opens for the first time.
         window
             .update(cx, |view, window, cx| {
+                window.set_window_title("kemote");
+                window.set_app_id("kemote");
                 window.focus(&view.text_input.focus_handle(cx));
                 cx.activate(true);
             })

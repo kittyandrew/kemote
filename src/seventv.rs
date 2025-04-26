@@ -1,16 +1,9 @@
+use crate::CACHE_DIR;
 use futures::AsyncReadExt as _;
-use futures::future;
-use gpui::http_client::AsyncBody;
-use gpui::http_client::HttpClient;
+use gpui::http_client::{AsyncBody, HttpClient};
 use reqwest_client::ReqwestClient;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use sha256::digest;
-use std::env;
-use std::fs;
-use std::fs::File;
-use std::io::prelude::*;
-use std::path::Path;
 
 const GQL_QUERY: &str = r#"
 query EmoteSearch(
@@ -196,7 +189,20 @@ struct Data {
     data: Emotes,
 }
 
-async fn query_7tv(query: String) -> Vec<Item> {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WebmEmote {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+}
+
+impl WebmEmote {
+    pub fn path(url: &String) -> String {
+        format!("{}/webm/{}.webp", *CACHE_DIR, sha256::digest(url))
+    }
+}
+
+pub async fn query_7tv(query: String) -> Vec<WebmEmote> {
     let payload = Payload {
         query: GQL_QUERY,
         // @NOTE: there are also optional filters and other options.
@@ -205,10 +211,11 @@ async fn query_7tv(query: String) -> Vec<Item> {
             tags: vec![],
             sort_by: "TOP_ALL_TIME".to_string(), // @TODO: should be an enum
             page: 1,
-            per_page: 15,
+            per_page: 50,
         },
     };
 
+    // @TODO: Client can be created once for the whole gpui cx and passed in here?
     let client = ReqwestClient::new();
     let raw_payload = AsyncBody::from_bytes(serde_json::to_vec(&payload).expect("rip payload serialization").into());
     let mut raw_response = String::new(); // maybe replace with read to bytes
@@ -220,90 +227,30 @@ async fn query_7tv(query: String) -> Vec<Item> {
         .read_to_string(&mut raw_response)
         .await
         .unwrap();
-    return serde_json::from_str::<Data>(&raw_response)
+
+    // unpacking nested response schema
+    let items = serde_json::from_str::<Data>(&raw_response)
         .expect("rip json response load")
         .data
         .emotes
         .search
         .items;
-}
 
-#[derive(Debug)]
-pub struct WebmEmote {
-    pub id: String,
-    pub name: String,
-    pub path: String,
-}
-
-async fn download_webm_if_not_cached(emotes: &Vec<Item>) -> Vec<WebmEmote> {
-    let webm_dir = format!("{}/.cache/emotespicker/webm", env::var("HOME").unwrap());
-    fs::create_dir_all(webm_dir.clone()).expect("rip webm dir");
-    // let mut webms = vec![];
-    let client = ReqwestClient::new();
-
-    let results = future::join_all(emotes.into_iter().map(|emote| {
-        let client = &client;
-        let webm_dir = webm_dir.clone();
-
-        async move {
-            let webm_fp = format!("{}/{}.webp", webm_dir.clone(), emote.id.clone());
-            // We are assuming here that if failed to create - it already exists..
-            let gif_entry = emote.images.iter().find(|o| {
-                // println!("ENTRY: {:?}", o);
-                o.scale == 4 && o.mime == "image/webp"
-            });
-
-            if let Some(entry) = gif_entry {
-                if Path::new(&webm_fp).exists() {
-                    println!("Using cached file: {:?}!", webm_fp.clone());
-                } else {
-                    if let Ok(mut file) = File::create(webm_fp.clone()) {
-                        println!("DOWNLOADING: {:?}", entry.url.clone());
-
-                        let mut raw_response = Vec::new();
-                        client
-                            .get(&entry.url, AsyncBody::empty(), true)
-                            .await
-                            .expect("rip download request")
-                            .into_body()
-                            .read_to_end(&mut raw_response)
-                            .await
-                            .expect(&format!("rip download body: {}", &entry.url));
-                        file.write_all(&raw_response).expect("rip write file");
-                    }
-                }
-            } else {
-                println!("NO GIF FORMAT FOR EMOTE {:?}", emote.name.clone());
-                return None;
-            }
-
+    items
+        .into_iter()
+        .map(|emote| {
             Some(WebmEmote {
                 id: emote.id.clone(),
                 name: emote.name.clone(),
-                path: webm_fp.clone(),
+                url: emote
+                    .images
+                    .iter()
+                    .find(|o| o.scale == 4 && o.mime == "image/webp")
+                    .expect("rip finding specified image mime")
+                    .url
+                    .clone(),
             })
-        }
-    }))
-    .await;
-
-    return results.into_iter().filter_map(|e| e).collect();
-}
-
-pub async fn get_7tv(query: String) -> Vec<WebmEmote> {
-    let queries_dir = format!("{}/.cache/emotespicker/queries", env::var("HOME").expect("rip home"));
-    fs::create_dir_all(queries_dir.clone()).expect("rip queries dir");
-    let query_fp = format!("{}/{}.json", queries_dir, digest(query.clone()));
-    if let Ok(mut file) = File::open(query_fp.clone()) {
-        let mut contents = String::new();
-        file.read_to_string(&mut contents).expect("rip file read");
-        let emotes: Vec<Item> = serde_json::from_str(&contents).expect("rip json load");
-        download_webm_if_not_cached(&emotes).await
-    } else {
-        println!("QUERYING: {:?}", query.clone());
-        let emotes = query_7tv(query).await;
-        let mut file = File::create(query_fp.clone()).expect("rip create file");
-        file.write_all(serde_json::to_vec_pretty(&emotes).unwrap().as_ref())
-            .expect("rip write file");
-        download_webm_if_not_cached(&emotes).await
-    }
+        })
+        .filter_map(|e| e)
+        .collect()
 }

@@ -1,48 +1,71 @@
+mod cache;
 mod seventv;
-use std::io::BufReader;
-use std::io::prelude::*;
-
-use image::AnimationDecoder;
-use std::fs::File;
-
-use gpui_tokio;
-use image::DynamicImage;
-use image::codecs::webp::WebPDecoder;
-use seventv::WebmEmote;
-use std::io::Cursor;
-use std::ops::Range;
-use std::path::PathBuf;
-use util::{paths::PathExt, truncate_to_byte_limit};
-use wl_clipboard_rs::copy::{ClipboardType, MimeSource, MimeType, Options, Source};
 
 use gpui::{
-    App, Application, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseUpEvent, PaintQuad, Pixels,
-    ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions,
-    actions, black, div, fill, hsla, img, point, prelude::*, px, relative, rgb, rgba, size,
+    App, AppContext, Application, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseUpEvent,
+    PaintQuad, Pixels, ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
+    WindowOptions, actions, black, div, fill, hsla, image_cache, img, point, prelude::*, px, relative, rgb, rgba, size,
 };
+use image::{AnimationDecoder, DynamicImage, Rgba, codecs::webp::WebPDecoder};
+use lazy_static::lazy_static;
+use seventv::WebmEmote;
+use std::collections::VecDeque;
+use std::env;
+use std::fs::{self, File};
+use std::io::{BufReader, Cursor, prelude::*};
+use std::ops::Range;
+use std::path::PathBuf;
+use std::sync::{Arc, atomic};
+use std::time::Duration;
 use unicode_segmentation::*;
+use util::truncate_to_byte_limit;
+use wl_clipboard_rs::copy::{ClipboardType, MimeSource, MimeType, Options, Source};
 
-actions!(text_input, [Enter, Backspace, Escape]);
+actions!(text_input, [Backspace, Escape, CtrlSpace, CtrlS]);
 
-const VERSION: &str = "0.1.0"; // keep in sync with Cargo.toml
+lazy_static! {
+    static ref APP_NAME: String = String::from(if cfg!(debug_assertions) { "dev-kemote" } else { "kemote" });
+    static ref CACHE_DIR: String = format!("{}/.cache/{}", env::var("HOME").unwrap(), *APP_NAME);
+}
+const VERSION: &str = "0.2.0"; // keep in sync with Cargo.toml
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DisplayedEmote {
-    emote: WebmEmote,
-    focus_handle: FocusHandle,
+    emote: seventv::WebmEmote,
 }
 
 impl DisplayedEmote {
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _window: &mut Window, _: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         println!("CLICKED EMOTE: {:?}", &self.emote);
 
-        let f = File::open(&self.emote.path).expect("rip opening emotes path");
-        let webp_decoder = WebPDecoder::new(BufReader::new(f)).expect("rip webp decoder");
+        let window_root = window
+            .root::<InputExample>()
+            .expect("rip unwrap 1")
+            .expect("rip unwrap 2");
+
+        window_root.update(cx, |view, cx| {
+            view.text_input.update(cx, |tinput, _cx| {
+                // @TODO: To make window re-render recently clicked emotes, we would need to
+                //  actually have some way to track if those are currently being rendered vs
+                //  specific search emojies being rendered. The simplest way would probably be a
+                //  'recent emotes' state (bool?) so instead of copying recent emotes into emotes
+                //  array, we would just render from emotes array if recent emotes is true. Only
+                //  then this change could be updated in real time.
+                tinput.recent_emotes.access(self.emote.clone());
+                println!("NEW SIZE OF RECENT EMOTES: {:?}", tinput.recent_emotes.emotes.len());
+            });
+        });
+
+        let f = File::open(PathBuf::from(WebmEmote::path(&self.emote.url))).expect("rip opening emotes path");
+        let mut webp_decoder = WebPDecoder::new(BufReader::new(f)).expect("rip webp decoder");
         let mut buffer: Vec<u8> = Vec::new();
 
         let final_path: String;
         if webp_decoder.has_animation() {
+            webp_decoder
+                .set_background_color(Rgba([0, 0, 0, 0]))
+                .expect("rip webp decoder");
             webp_decoder
                 .into_frames()
                 // @TODO: we take first frame right now, but we should allow getting static webp
@@ -66,7 +89,7 @@ impl DisplayedEmote {
                 .write_all(&buffer)
                 .expect("rip write file");
         } else {
-            final_path = self.emote.path.clone();
+            final_path = WebmEmote::path(&self.emote.url);
             DynamicImage::from_decoder(webp_decoder)
                 .expect("rip decoding static webp")
                 .to_rgba8()
@@ -94,31 +117,85 @@ impl DisplayedEmote {
 impl Render for DisplayedEmote {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .max_w_32()
+            .max_w_20()
             .ml_6()
+            .mt_6()
             .text_center()
-            .mt_auto() // auto-fill space so short images are aligned from the bottom
             .child(
-                div().mt_4().child(
-                    div()
-                        .text_size(px(12.))
-                        .child(
-                            img(PathBuf::from(self.emote.path.clone()))
-                                .object_fit(gpui::ObjectFit::Contain)
-                                .max_w_32()
-                                .max_h_32()
-                                .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                                .id("webp"), // .id("gif")
-                        )
-                        .child(self.emote.name.clone()),
-                ),
+                img(self.emote.url.clone())
+                    .max_w_20()
+                    .max_h_20()
+                    .object_fit(gpui::ObjectFit::Contain)
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+                    .id("webp")
+                    // Default loading element (hardcoded emote for now) ...
+                    .with_loading(|| {
+                        img("https://cdn.7tv.app/emote/01F79PC23G0000DRDGH5T4QFMA/4x.webp")
+                            .max_w_20()
+                            .max_h_20()
+                            .object_fit(gpui::ObjectFit::Contain)
+                            .id("webp")
+                            .into_any_element()
+                    }),
+            )
+            .child(
+                div()
+                    .text_size(px(10.))
+                    .flex_shrink_0()
+                    .overflow_x_hidden()
+                    .text_ellipsis()
+                    .line_clamp(1)
+                    .child(self.emote.name.clone()),
             )
     }
 }
 
-impl Focusable for DisplayedEmote {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
+#[derive(Debug)]
+struct RecentEmotes {
+    emotes: VecDeque<seventv::WebmEmote>,
+    capacity: usize,
+}
+
+impl RecentEmotes {
+    pub fn new(capacity: usize) -> Self {
+        let mut recent_emotes = Self {
+            emotes: VecDeque::with_capacity(capacity),
+            capacity,
+        };
+
+        let recent_fp = format!("{}/recent.json", *CACHE_DIR);
+        if let Ok(mut file) = File::open(recent_fp.clone()) {
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).expect("rip file read");
+            let emotes: Vec<seventv::WebmEmote> = serde_json::from_str(&contents).expect("rip json load");
+            for emote in emotes {
+                recent_emotes.emotes.push_back(emote);
+            }
+        }
+
+        recent_emotes
+    }
+
+    pub fn access(&mut self, emote: seventv::WebmEmote) {
+        if let Some(pos) = self.emotes.iter().position(|e| e == &emote) {
+            self.emotes.remove(pos);
+        }
+
+        if self.emotes.len() >= self.capacity {
+            self.emotes.pop_back();
+        }
+
+        self.emotes.push_front(emote);
+
+        let recent_fp = format!("{}/recent.json", *CACHE_DIR);
+        if let Ok(mut file) = File::create(recent_fp.clone()) {
+            file.write_all(serde_json::to_vec_pretty(&self.emotes).unwrap().as_ref())
+                .expect("rip write file");
+        }
+    }
+
+    pub fn recent(&self) -> impl Iterator<Item = &seventv::WebmEmote> {
+        self.emotes.iter()
     }
 }
 
@@ -132,39 +209,54 @@ struct TextInput {
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     emotes: Vec<Entity<DisplayedEmote>>,
+    recent_emotes: RecentEmotes,
+    last_active: Arc<atomic::AtomicBool>,
 }
 
 impl TextInput {
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
-        println!("BACKSPACE: ???");
         if self.selected_range.is_empty() {
             self.select_to(self.previous_boundary(self.cursor_offset()), cx)
         }
         self.replace_text_in_range(None, "", window, cx)
     }
 
-    fn enter(&mut self, _: &Enter, _window: &mut Window, cx: &mut Context<Self>) {
-        let query = truncate_to_byte_limit(&self.content, 64).to_lowercase();
-
+    fn show_recent_emotes(&mut self, _: &CtrlSpace, _window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn(async move |entity, cx| {
-            println!("ENTER: {:?}", query);
-
-            let emotes = seventv::get_7tv(query.to_sanitized_string()).await;
-
             entity
                 .update(cx, |new_self, cx| {
+                    let emotes: Vec<seventv::WebmEmote> = new_self.recent_emotes.recent().cloned().collect();
+
                     new_self.emotes.clear();
                     for emote in emotes {
-                        new_self.emotes.push(cx.new(|cx| DisplayedEmote {
-                            emote,
-                            focus_handle: cx.focus_handle(),
-                        }));
+                        new_self.emotes.push(cx.new(|_cx| DisplayedEmote { emote }));
                     }
                     cx.notify();
                 })
                 .expect("rip updating text_input");
         })
         .detach();
+    }
+
+    fn clear_input(&mut self, _: &CtrlS, _window: &mut Window, cx: &mut Context<Self>) {
+        self.reset();
+
+        cx.spawn(async move |entity, cx| {
+            entity
+                .update(cx, |new_self, cx| {
+                    let emotes: Vec<seventv::WebmEmote> = new_self.recent_emotes.recent().cloned().collect();
+
+                    new_self.emotes.clear();
+                    for emote in emotes {
+                        new_self.emotes.push(cx.new(|_cx| DisplayedEmote { emote }));
+                    }
+                    cx.notify();
+                })
+                .expect("rip updating text_input");
+        })
+        .detach();
+
+        cx.notify();
     }
 
     fn cursor_offset(&self) -> usize {
@@ -233,6 +325,15 @@ impl TextInput {
             .find_map(|(idx, _)| (idx < offset).then_some(idx))
             .unwrap_or(0)
     }
+
+    fn reset(&mut self) {
+        self.content = "".into();
+        self.selected_range = 0..0;
+        self.selection_reversed = false;
+        self.marked_range = None;
+        self.last_layout = None;
+        self.last_bounds = None;
+    }
 }
 
 impl EntityInputHandler for TextInput {
@@ -291,6 +392,64 @@ impl EntityInputHandler for TextInput {
         self.selected_range = range.start + new_text.len()..range.start + new_text.len();
         self.marked_range.take();
         cx.notify();
+
+        // QUERY SECTION
+
+        let query = truncate_to_byte_limit(&self.content, 64).to_lowercase();
+        self.last_active.store(false, atomic::Ordering::Relaxed);
+        self.last_active = Arc::new(atomic::AtomicBool::new(true));
+
+        let last_active = self.last_active.clone();
+        cx.spawn(async move |entity, cx| {
+            cx.background_executor().timer(Duration::from_millis(200)).await;
+
+            if !last_active.load(atomic::Ordering::Relaxed) {
+                return;
+            }
+
+            println!("Potential query: {:?}", query);
+            let mut emotes: Vec<seventv::WebmEmote> = vec![];
+            if !query.is_empty() {
+                // emotes = seventv::get_7tv(query.to_sanitized_string()).await;
+                let queries_dir = format!("{}/queries", *CACHE_DIR);
+                fs::create_dir_all(queries_dir.clone()).expect("rip queries dir");
+                let query_fp = format!("{}/{}.json", queries_dir, sha256::digest(query.clone()));
+                if let Ok(mut file) = File::open(query_fp.clone()) {
+                    let mut contents = String::new();
+                    file.read_to_string(&mut contents).expect("rip file read");
+                    emotes = serde_json::from_str(&contents).expect("rip json load");
+                } else {
+                    println!("QUERYING: {:?}", query.clone());
+                    emotes = seventv::query_7tv(query.to_string()).await;
+                    let mut file = File::create(query_fp.clone()).expect("rip create file");
+                    file.write_all(serde_json::to_vec_pretty(&emotes).unwrap().as_ref())
+                        .expect("rip write file");
+                }
+
+                if !last_active.load(atomic::Ordering::Relaxed) {
+                    return;
+                }
+            }
+
+            entity
+                .update(cx, |new_self, cx| {
+                    if !last_active.load(atomic::Ordering::Relaxed) {
+                        return;
+                    }
+
+                    if query.is_empty() {
+                        emotes = new_self.recent_emotes.recent().cloned().collect();
+                    }
+
+                    new_self.emotes.clear();
+                    for emote in emotes {
+                        new_self.emotes.push(cx.new(|_cx| DisplayedEmote { emote }));
+                    }
+                    cx.notify();
+                })
+                .expect("rip updating text_input");
+        })
+        .detach();
     }
 
     fn replace_and_mark_text_in_range(
@@ -520,7 +679,8 @@ impl Render for TextInput {
             .track_focus(&self.focus_handle(cx))
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))
-            .on_action(cx.listener(Self::enter))
+            .on_action(cx.listener(Self::show_recent_emotes))
+            .on_action(cx.listener(Self::clear_input))
             .bg(rgb(0x838ba7))
             .line_height(px(30.))
             .text_size(px(24.))
@@ -548,6 +708,7 @@ impl Focusable for TextInput {
 
 struct InputExample {
     text_input: Entity<TextInput>,
+    image_cache: Entity<cache::HashMapImageCache>,
 }
 
 impl InputExample {
@@ -558,64 +719,74 @@ impl InputExample {
 
 impl Render for InputExample {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .bg(rgb(0x626880))
-            .on_action(cx.listener(Self::exit))
-            .flex()
-            .flex_col()
-            .size_full()
-            .child(
-                div()
-                    .bg(rgb(0x414559))
-                    .border_b_1()
-                    .border_color(black())
-                    .flex()
-                    .flex_row()
-                    .justify_between()
-                    .child(
-                        div()
-                            .ml_auto()
-                            .mr_auto()
-                            .text_color(rgb(0xc6d0f5))
-                            .child(format!("kemote - v{}", VERSION)),
-                    ),
-            )
-            .child(self.text_input.clone())
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .mr_6()
-                    .mt_6()
-                    .children(self.text_input.read(cx).emotes.iter().map(|gif| gif.clone())),
-            )
-            .child(
-                div()
-                    .bg(rgb(0x414559))
-                    .border_b_1()
-                    .mt_auto()
-                    .border_color(black())
-                    .flex()
-                    .flex_row()
-                    .justify_between()
-                    .child(div().ml_2().text_color(rgb(0xc6d0f5)).child(format!("esc: Exit"))),
-            )
+        image_cache(self.image_cache.clone()).size_full().child(
+            div()
+                .bg(rgb(0x626880))
+                .on_action(cx.listener(Self::exit))
+                .flex()
+                .flex_col()
+                .size_full()
+                .child(
+                    div()
+                        .bg(rgb(0x414559))
+                        .border_b_1()
+                        .border_color(black())
+                        .flex()
+                        .flex_row()
+                        .justify_between()
+                        .child(
+                            div()
+                                .ml_auto()
+                                .mr_auto()
+                                .text_color(rgb(0xc6d0f5))
+                                .child(format!("{} - v{}", *APP_NAME, VERSION)),
+                        ),
+                )
+                .child(self.text_input.clone())
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .mr_6()
+                        .mt_6()
+                        .children(self.text_input.read(cx).emotes.iter().map(|gif| gif.clone())),
+                )
+                .child(
+                    div()
+                        .bg(rgb(0x414559))
+                        .border_b_1()
+                        .mt_auto()
+                        .border_color(black())
+                        .child(
+                            div()
+                                .ml_2()
+                                .text_color(rgb(0xc6d0f5))
+                                .flex()
+                                .flex_row()
+                                .gap_6()
+                                .child(format!("esc: Exit"))
+                                .child(format!("ctrl-space: Recent Emotes"))
+                                .child(format!("ctrl-s: Clear Search")),
+                        ),
+                ),
+        )
     }
 }
 
 fn main() {
     Application::new().run(|cx: &mut App| {
-        gpui_tokio::init(cx);
+        cx.activate(true);
 
-        // width: 24 + (128 * 5 + 24 * 4) + 24 = 784
-        // height: TODO
-        let bounds = Bounds::centered(None, size(px(784.), px(680.0)), cx);
         cx.bind_keys([
             KeyBinding::new("backspace", Backspace, None),
-            KeyBinding::new("enter", Enter, None),
             KeyBinding::new("escape", Escape, None),
+            KeyBinding::new("ctrl-space", CtrlSpace, None),
+            KeyBinding::new("ctrl-s", CtrlS, None),
         ]);
 
+        // width: 24 + (80 * 10 + 24 * 9) + 24 = 1064
+        // height: TODO
+        let bounds = Bounds::centered(None, size(px(1064.), px(850.)), cx);
         let window = cx
             .open_window(
                 WindowOptions {
@@ -623,6 +794,7 @@ fn main() {
                     ..Default::default()
                 },
                 |_, cx| {
+                    let recent_emotes = RecentEmotes::new(15);
                     cx.new(|cx| InputExample {
                         text_input: cx.new(|cx| TextInput {
                             focus_handle: cx.focus_handle(),
@@ -633,8 +805,14 @@ fn main() {
                             marked_range: None,
                             last_layout: None,
                             last_bounds: None,
-                            emotes: vec![],
+                            emotes: recent_emotes
+                                .recent()
+                                .map(|emote| cx.new(|_cx| DisplayedEmote { emote: emote.clone() }))
+                                .collect(),
+                            recent_emotes,
+                            last_active: Arc::new(atomic::AtomicBool::new(true)),
                         }),
+                        image_cache: cache::HashMapImageCache::new(cx),
                     })
                 },
             )
@@ -643,10 +821,10 @@ fn main() {
         // This just sets focus to the input field when the window opens for the first time.
         window
             .update(cx, |view, window, cx| {
-                window.set_window_title("kemote");
-                window.set_app_id("kemote");
+                window.set_window_title(&APP_NAME);
+                window.set_app_id(&APP_NAME);
+
                 window.focus(&view.text_input.focus_handle(cx));
-                cx.activate(true);
             })
             .unwrap();
     });

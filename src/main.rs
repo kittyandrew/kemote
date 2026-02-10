@@ -3,9 +3,10 @@ mod seventv;
 
 use gpui::{
     App, AppContext, Application, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseUpEvent,
-    PaintQuad, Pixels, ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
-    WindowOptions, actions, black, div, fill, hsla, image_cache, img, point, prelude::*, px, relative, rgb, rgba, size,
+    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, InspectorElementId, KeyBinding, LayoutId,
+    MouseButton, MouseUpEvent, PaintQuad, Pixels, ShapedLine, SharedString, Style, TextAlign, TextRun,
+    UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions, actions, black, div, fill, hsla,
+    image_cache, img, point, prelude::*, px, relative, rgb, rgba, size,
 };
 use image::{AnimationDecoder, DynamicImage, Rgba, codecs::webp::WebPDecoder};
 use lazy_static::lazy_static;
@@ -537,9 +538,14 @@ impl Element for TextElement {
         None
     }
 
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
     fn request_layout(
         &mut self,
         _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
@@ -552,6 +558,7 @@ impl Element for TextElement {
     fn prepaint(
         &mut self,
         _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
@@ -605,7 +612,7 @@ impl Element for TextElement {
         };
 
         let font_size = style.font_size.to_pixels(window.rem_size());
-        let line = window.text_system().shape_line(display_text, font_size, &runs).unwrap();
+        let line = window.text_system().shape_line(display_text, font_size, &runs, None);
 
         let cursor_pos = line.x_for_index(cursor);
         let (selection, cursor) = if selected_range.is_empty() {
@@ -641,6 +648,7 @@ impl Element for TextElement {
     fn paint(
         &mut self,
         _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         prepaint: &mut Self::PrepaintState,
@@ -653,7 +661,7 @@ impl Element for TextElement {
             window.paint_quad(selection)
         }
         let line = prepaint.line.take().unwrap();
-        line.paint(bounds.origin, window.line_height(), window, cx).unwrap();
+        line.paint(bounds.origin, window.line_height(), TextAlign::Left, None, window, cx).unwrap();
 
         if focus_handle.is_focused(window) {
             if let Some(cursor) = prepaint.cursor.take() {
@@ -824,7 +832,7 @@ fn main() {
                 window.set_window_title(&APP_NAME);
                 window.set_app_id(&APP_NAME);
 
-                window.focus(&view.text_input.focus_handle(cx));
+                window.focus(&view.text_input.focus_handle(cx), cx);
             })
             .unwrap();
     });

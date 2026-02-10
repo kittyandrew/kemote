@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2024"
 
 [dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["http_client", "font-kit", "wayland"] }
+gpui = { git = "https://github.com/zed-industries/zed", default-features = false, features = ["font-kit", "wayland"] }
 gpui_tokio = { git = "https://github.com/zed-industries/zed" }
 util = { git = "https://github.com/zed-industries/zed" }
 reqwest_client = { git = "https://github.com/zed-industries/zed" }

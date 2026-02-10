@@ -36,7 +36,8 @@
       vulkan-loader
       libxkbcommon
       wayland
-      xorg.libX11
+      libx11
+      libxcb
     ];
   in {
     # nix build

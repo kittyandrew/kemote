@@ -1,15 +1,9 @@
 use crate::{CACHE_DIR, seventv::WebmEmote};
-use futures::AsyncReadExt as _;
-use futures::{FutureExt, future::Shared};
-use gpui::{
-    App, AppContext, Asset, AssetLogger, Entity, ImageAssetLoader, ImageCache, ImageCacheError,
-    RenderImage, Resource, Task, Window, hash, http_client::AsyncBody, http_client::HttpClient,
-};
+use futures::{AsyncReadExt as _, FutureExt, future::Shared};
+use gpui::{App, AppContext, Asset, AssetLogger, Entity, ImageAssetLoader, ImageCache, ImageCacheError, RenderImage, Resource};
+use gpui::{Task, Window, hash, http_client::AsyncBody, http_client::HttpClient};
 use reqwest_client::ReqwestClient;
-use std::fs::{self, File};
-use std::io::prelude::*;
-use std::path::{Path, PathBuf};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fs, fs::File, io::prelude::*, path::Path, path::PathBuf, sync::Arc};
 
 // Cache implementation, based on the default gpui cache, but with reads/writes to disk as an
 // intermediate step between in-memory cache and loading from remote source.
@@ -22,10 +16,7 @@ impl HashMapImageCache {
     /// Create a new image cache.
     #[inline]
     pub fn new(cx: &mut App) -> Entity<Self> {
-        let e = cx.new(|_cx| HashMapImageCache {
-            data: HashMap::new(),
-            client: Arc::new(ReqwestClient::new()),
-        });
+        let e = cx.new(|_cx| HashMapImageCache { data: HashMap::new(), client: Arc::new(ReqwestClient::new()) });
         cx.observe_release(&e, |image_cache, cx| {
             for (_, item) in std::mem::replace(&mut image_cache.data, HashMap::new()) {
                 if let Some(Ok(image)) = item.peek() {
@@ -41,10 +32,7 @@ impl HashMapImageCache {
     ///
     /// Returns `None` if the image is loading.
     pub fn load(
-        &mut self,
-        source: &Resource,
-        window: &mut Window,
-        cx: &mut App,
+        &mut self, source: &Resource, window: &mut Window, cx: &mut App,
     ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
         let hash = hash(source);
 
@@ -129,10 +117,7 @@ impl HashMapImageCache {
 
 impl ImageCache for HashMapImageCache {
     fn load(
-        &mut self,
-        resource: &Resource,
-        window: &mut Window,
-        cx: &mut App,
+        &mut self, resource: &Resource, window: &mut Window, cx: &mut App,
     ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
         HashMapImageCache::load(self, resource, window, cx)
     }

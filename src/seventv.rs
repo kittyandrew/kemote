@@ -229,12 +229,7 @@ pub async fn query_7tv(query: String) -> Vec<WebmEmote> {
         .unwrap();
 
     // unpacking nested response schema
-    let items = serde_json::from_str::<Data>(&raw_response)
-        .expect("rip json response load")
-        .data
-        .emotes
-        .search
-        .items;
+    let items = serde_json::from_str::<Data>(&raw_response).expect("rip json response load").data.emotes.search.items;
 
     items
         .into_iter()

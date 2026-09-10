@@ -1,24 +1,15 @@
 mod cache;
 mod seventv;
 
-use gpui::{
-    App, AppContext, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, InspectorElementId, KeyBinding, LayoutId,
-    MouseButton, MouseUpEvent, PaintQuad, Pixels, ShapedLine, SharedString, Style, TextAlign, TextRun,
-    UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions, actions, black, div, fill, hsla,
-    image_cache, img, point, prelude::*, px, relative, rgb, rgba, size,
-};
+use gpui::{App, AppContext, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler, rgb, rgba};
+use gpui::{FocusHandle, Focusable, GlobalElementId, InspectorElementId, KeyBinding, LayoutId, MouseButton, MouseUpEvent, size};
+use gpui::{PaintQuad, Pixels, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window};
+use gpui::{WindowBounds, WindowOptions, actions, black, div, fill, hsla, image_cache, img, point, prelude::*, px, relative};
 use image::{AnimationDecoder, DynamicImage, Rgba, codecs::webp::WebPDecoder};
 use lazy_static::lazy_static;
 use seventv::WebmEmote;
-use std::collections::VecDeque;
-use std::env;
-use std::fs::{self, File};
-use std::io::{BufReader, Cursor, prelude::*};
-use std::ops::Range;
-use std::path::PathBuf;
-use std::sync::{Arc, atomic};
-use std::time::Duration;
+use std::{collections::VecDeque, env, fs, fs::File, io::BufReader, io::Cursor, io::prelude::*, ops::Range, path::PathBuf};
+use std::{sync::Arc, sync::atomic, time::Duration};
 use unicode_segmentation::*;
 use util::truncate_to_byte_limit;
 use wl_clipboard_rs::copy::{ClipboardType, MimeSource, MimeType, Options, Source};
@@ -40,10 +31,7 @@ impl DisplayedEmote {
     fn on_mouse_up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         println!("CLICKED EMOTE: {:?}", &self.emote);
 
-        let window_root = window
-            .root::<InputExample>()
-            .expect("rip unwrap 1")
-            .expect("rip unwrap 2");
+        let window_root = window.root::<InputExample>().expect("rip unwrap 1").expect("rip unwrap 2");
 
         window_root.update(cx, |view, cx| {
             view.text_input.update(cx, |tinput, _cx| {
@@ -64,9 +52,7 @@ impl DisplayedEmote {
 
         let final_path: String;
         if webp_decoder.has_animation() {
-            webp_decoder
-                .set_background_color(Rgba([0, 0, 0, 0]))
-                .expect("rip webp decoder");
+            webp_decoder.set_background_color(Rgba([0, 0, 0, 0])).expect("rip webp decoder");
             webp_decoder
                 .into_frames()
                 // @TODO: we take first frame right now, but we should allow getting static webp
@@ -85,10 +71,7 @@ impl DisplayedEmote {
             //  to telegram somehow, but this is probably fine for the future. In the future might want
             //  to create this file in the persistent cache during download.
             final_path = format!("/tmp/{}.webp", self.emote.id.clone());
-            File::create(final_path.clone())
-                .expect("rip tmp file")
-                .write_all(&buffer)
-                .expect("rip write file");
+            File::create(final_path.clone()).expect("rip tmp file").write_all(&buffer).expect("rip write file");
         } else {
             final_path = WebmEmote::path(&self.emote.url);
             DynamicImage::from_decoder(webp_decoder)
@@ -102,10 +85,7 @@ impl DisplayedEmote {
         opts.omit_additional_text_mime_types(true); // do not add default mimetypes
         opts.clipboard(ClipboardType::Both);
         opts.copy_multi(vec![
-            MimeSource {
-                source: Source::Bytes(buffer.into()),
-                mime_type: MimeType::Specific("image/webp".to_string()),
-            },
+            MimeSource { source: Source::Bytes(buffer.into()), mime_type: MimeType::Specific("image/webp".to_string()) },
             MimeSource {
                 source: Source::Bytes(format!("file://{}", &final_path).into_bytes().into()),
                 mime_type: MimeType::Specific("text/x-moz-url".to_string()),
@@ -159,10 +139,7 @@ struct RecentEmotes {
 
 impl RecentEmotes {
     pub fn new(capacity: usize) -> Self {
-        let mut recent_emotes = Self {
-            emotes: VecDeque::with_capacity(capacity),
-            capacity,
-        };
+        let mut recent_emotes = Self { emotes: VecDeque::with_capacity(capacity), capacity };
 
         let recent_fp = format!("{}/recent.json", *CACHE_DIR);
         if let Ok(mut file) = File::open(recent_fp.clone()) {
@@ -190,8 +167,7 @@ impl RecentEmotes {
 
         let recent_fp = format!("{}/recent.json", *CACHE_DIR);
         if let Ok(mut file) = File::create(recent_fp.clone()) {
-            file.write_all(serde_json::to_vec_pretty(&self.emotes).unwrap().as_ref())
-                .expect("rip write file");
+            file.write_all(serde_json::to_vec_pretty(&self.emotes).unwrap().as_ref()).expect("rip write file");
         }
     }
 
@@ -261,11 +237,7 @@ impl TextInput {
     }
 
     fn cursor_offset(&self) -> usize {
-        if self.selection_reversed {
-            self.selected_range.start
-        } else {
-            self.selected_range.end
-        }
+        if self.selection_reversed { self.selected_range.start } else { self.selected_range.end }
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -320,11 +292,7 @@ impl TextInput {
     }
 
     fn previous_boundary(&self, offset: usize) -> usize {
-        self.content
-            .grapheme_indices(true)
-            .rev()
-            .find_map(|(idx, _)| (idx < offset).then_some(idx))
-            .unwrap_or(0)
+        self.content.grapheme_indices(true).rev().find_map(|(idx, _)| (idx < offset).then_some(idx)).unwrap_or(0)
     }
 
     fn reset(&mut self) {
@@ -339,10 +307,7 @@ impl TextInput {
 
 impl EntityInputHandler for TextInput {
     fn text_for_range(
-        &mut self,
-        range_utf16: Range<usize>,
-        actual_range: &mut Option<Range<usize>>,
-        _window: &mut Window,
+        &mut self, range_utf16: Range<usize>, actual_range: &mut Option<Range<usize>>, _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
         println!("text_for_range:entry - {:?}", actual_range.clone());
@@ -353,16 +318,10 @@ impl EntityInputHandler for TextInput {
     }
 
     fn selected_text_range(
-        &mut self,
-        _ignore_disabled_input: bool,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        &mut self, _ignore_disabled_input: bool, _window: &mut Window, _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
         println!("selected_text_range:entry - ???");
-        Some(UTF16Selection {
-            range: self.range_to_utf16(&self.selected_range),
-            reversed: self.selection_reversed,
-        })
+        Some(UTF16Selection { range: self.range_to_utf16(&self.selected_range), reversed: self.selection_reversed })
     }
 
     fn marked_text_range(&self, _window: &mut Window, _cx: &mut Context<Self>) -> Option<Range<usize>> {
@@ -376,11 +335,7 @@ impl EntityInputHandler for TextInput {
     }
 
     fn replace_text_in_range(
-        &mut self,
-        range_utf16: Option<Range<usize>>,
-        new_text: &str,
-        _: &mut Window,
-        cx: &mut Context<Self>,
+        &mut self, range_utf16: Option<Range<usize>>, new_text: &str, _: &mut Window, cx: &mut Context<Self>,
     ) {
         println!("replace_text_in_range:entry ---");
         let range = range_utf16
@@ -423,8 +378,7 @@ impl EntityInputHandler for TextInput {
                     println!("QUERYING: {:?}", query.clone());
                     emotes = seventv::query_7tv(query.to_string()).await;
                     let mut file = File::create(query_fp.clone()).expect("rip create file");
-                    file.write_all(serde_json::to_vec_pretty(&emotes).unwrap().as_ref())
-                        .expect("rip write file");
+                    file.write_all(serde_json::to_vec_pretty(&emotes).unwrap().as_ref()).expect("rip write file");
                 }
 
                 if !last_active.load(atomic::Ordering::Relaxed) {
@@ -454,12 +408,8 @@ impl EntityInputHandler for TextInput {
     }
 
     fn replace_and_mark_text_in_range(
-        &mut self,
-        range_utf16: Option<Range<usize>>,
-        new_text: &str,
-        new_selected_range_utf16: Option<Range<usize>>,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
+        &mut self, range_utf16: Option<Range<usize>>, new_text: &str, new_selected_range_utf16: Option<Range<usize>>,
+        _window: &mut Window, cx: &mut Context<Self>,
     ) {
         println!("replace_and_mark_text_in_range:entry - ???");
         let range = range_utf16
@@ -480,11 +430,7 @@ impl EntityInputHandler for TextInput {
     }
 
     fn bounds_for_range(
-        &mut self,
-        range_utf16: Range<usize>,
-        bounds: Bounds<Pixels>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        &mut self, range_utf16: Range<usize>, bounds: Bounds<Pixels>, _window: &mut Window, _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         println!("bounds_for_range:entry - ???");
         let last_layout = self.last_layout.as_ref()?;
@@ -496,10 +442,7 @@ impl EntityInputHandler for TextInput {
     }
 
     fn character_index_for_point(
-        &mut self,
-        point: gpui::Point<Pixels>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        &mut self, point: gpui::Point<Pixels>, _window: &mut Window, _cx: &mut Context<Self>,
     ) -> Option<usize> {
         println!("character_index_for_print:entry - ???");
         let line_point = self.last_bounds?.localize(&point)?;
@@ -543,11 +486,7 @@ impl Element for TextElement {
     }
 
     fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
+        &mut self, _id: Option<&GlobalElementId>, _inspector_id: Option<&InspectorElementId>, window: &mut Window, cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut style = Style::default();
         style.size.width = relative(1.).into();
@@ -556,13 +495,8 @@ impl Element for TextElement {
     }
 
     fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
+        &mut self, _id: Option<&GlobalElementId>, _inspector_id: Option<&InspectorElementId>, bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState, window: &mut Window, cx: &mut App,
     ) -> Self::PrepaintState {
         let input = self.input.read(cx);
         let content = &input.content.clone();
@@ -570,11 +504,8 @@ impl Element for TextElement {
         let cursor = input.cursor_offset();
         let style = window.text_style();
 
-        let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), hsla(0., 0., 0., 0.2))
-        } else {
-            (content.clone(), style.color)
-        };
+        let (display_text, text_color) =
+            if content.is_empty() { (input.placeholder.clone(), hsla(0., 0., 0., 0.2)) } else { (content.clone(), style.color) };
 
         let run = TextRun {
             len: display_text.len(),
@@ -586,23 +517,13 @@ impl Element for TextElement {
         };
         let runs = if let Some(marked_range) = input.marked_range.as_ref() {
             vec![
-                TextRun {
-                    len: marked_range.start,
-                    ..run.clone()
-                },
+                TextRun { len: marked_range.start, ..run.clone() },
                 TextRun {
                     len: marked_range.end - marked_range.start,
-                    underline: Some(UnderlineStyle {
-                        color: Some(run.color),
-                        thickness: px(1.0),
-                        wavy: false,
-                    }),
+                    underline: Some(UnderlineStyle { color: Some(run.color), thickness: px(1.0), wavy: false }),
                     ..run.clone()
                 },
-                TextRun {
-                    len: display_text.len() - marked_range.end,
-                    ..run.clone()
-                },
+                TextRun { len: display_text.len() - marked_range.end, ..run.clone() },
             ]
             .into_iter()
             .filter(|run| run.len > 0)
@@ -619,10 +540,7 @@ impl Element for TextElement {
             (
                 None,
                 Some(fill(
-                    Bounds::new(
-                        point(bounds.left() + cursor_pos, bounds.top()),
-                        size(px(2.), bounds.bottom() - bounds.top()),
-                    ),
+                    Bounds::new(point(bounds.left() + cursor_pos, bounds.top()), size(px(2.), bounds.bottom() - bounds.top())),
                     gpui::blue(),
                 )),
             )
@@ -638,22 +556,12 @@ impl Element for TextElement {
                 None,
             )
         };
-        PrepaintState {
-            line: Some(line),
-            cursor,
-            selection,
-        }
+        PrepaintState { line: Some(line), cursor, selection }
     }
 
     fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
+        &mut self, _id: Option<&GlobalElementId>, _inspector_id: Option<&InspectorElementId>, bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState, prepaint: &mut Self::PrepaintState, window: &mut Window, cx: &mut App,
     ) {
         let focus_handle = self.input.read(cx).focus_handle.clone();
         window.handle_input(&focus_handle, ElementInputHandler::new(bounds, self.input.clone()), cx);
@@ -701,9 +609,7 @@ impl Render for TextInput {
                     .bg(rgb(0x838ba7))
                     .overflow_x_hidden()
                     .border_color(gpui::blue())
-                    .child(TextElement {
-                        input: cx.entity().clone(),
-                    }),
+                    .child(TextElement { input: cx.entity().clone() }),
             )
     }
 }
@@ -742,40 +648,24 @@ impl Render for InputExample {
                         .flex()
                         .flex_row()
                         .justify_between()
-                        .child(
-                            div()
-                                .ml_auto()
-                                .mr_auto()
-                                .text_color(rgb(0xc6d0f5))
-                                .child(format!("{} - v{}", *APP_NAME, VERSION)),
-                        ),
+                        .child(div().ml_auto().mr_auto().text_color(rgb(0xc6d0f5)).child(format!("{} - v{}", *APP_NAME, VERSION))),
                 )
                 .child(self.text_input.clone())
                 .child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .mr_6()
-                        .mt_6()
-                        .children(self.text_input.read(cx).emotes.iter().map(|gif| gif.clone())),
+                    div().flex().flex_wrap().mr_6().mt_6().children(self.text_input.read(cx).emotes.iter().map(|gif| gif.clone())),
                 )
                 .child(
-                    div()
-                        .bg(rgb(0x414559))
-                        .border_b_1()
-                        .mt_auto()
-                        .border_color(black())
-                        .child(
-                            div()
-                                .ml_2()
-                                .text_color(rgb(0xc6d0f5))
-                                .flex()
-                                .flex_row()
-                                .gap_6()
-                                .child(format!("esc: Exit"))
-                                .child(format!("ctrl-space: Recent Emotes"))
-                                .child(format!("ctrl-s: Clear Search")),
-                        ),
+                    div().bg(rgb(0x414559)).border_b_1().mt_auto().border_color(black()).child(
+                        div()
+                            .ml_2()
+                            .text_color(rgb(0xc6d0f5))
+                            .flex()
+                            .flex_row()
+                            .gap_6()
+                            .child(format!("esc: Exit"))
+                            .child(format!("ctrl-space: Recent Emotes"))
+                            .child(format!("ctrl-s: Clear Search")),
+                    ),
                 ),
         )
     }
@@ -796,34 +686,28 @@ fn main() {
         // height: TODO
         let bounds = Bounds::centered(None, size(px(1064.), px(850.)), cx);
         let window = cx
-            .open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    ..Default::default()
-                },
-                |_, cx| {
-                    let recent_emotes = RecentEmotes::new(15);
-                    cx.new(|cx| InputExample {
-                        text_input: cx.new(|cx| TextInput {
-                            focus_handle: cx.focus_handle(),
-                            content: "".into(),
-                            placeholder: "Type here...".into(),
-                            selected_range: 0..0,
-                            selection_reversed: false,
-                            marked_range: None,
-                            last_layout: None,
-                            last_bounds: None,
-                            emotes: recent_emotes
-                                .recent()
-                                .map(|emote| cx.new(|_cx| DisplayedEmote { emote: emote.clone() }))
-                                .collect(),
-                            recent_emotes,
-                            last_active: Arc::new(atomic::AtomicBool::new(true)),
-                        }),
-                        image_cache: cache::HashMapImageCache::new(cx),
-                    })
-                },
-            )
+            .open_window(WindowOptions { window_bounds: Some(WindowBounds::Windowed(bounds)), ..Default::default() }, |_, cx| {
+                let recent_emotes = RecentEmotes::new(15);
+                cx.new(|cx| InputExample {
+                    text_input: cx.new(|cx| TextInput {
+                        focus_handle: cx.focus_handle(),
+                        content: "".into(),
+                        placeholder: "Type here...".into(),
+                        selected_range: 0..0,
+                        selection_reversed: false,
+                        marked_range: None,
+                        last_layout: None,
+                        last_bounds: None,
+                        emotes: recent_emotes
+                            .recent()
+                            .map(|emote| cx.new(|_cx| DisplayedEmote { emote: emote.clone() }))
+                            .collect(),
+                        recent_emotes,
+                        last_active: Arc::new(atomic::AtomicBool::new(true)),
+                    }),
+                    image_cache: cache::HashMapImageCache::new(cx),
+                })
+            })
             .unwrap();
 
         // This just sets focus to the input field when the window opens for the first time.

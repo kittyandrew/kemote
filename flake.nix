@@ -25,6 +25,7 @@
       pkg-config
       openssl.dev # to build gpui and reqwests
       wayland # to build gpui
+      fontconfig
     ];
 
     src = pkgs.lib.cleanSourceWith {

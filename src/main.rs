@@ -2,7 +2,7 @@ mod cache;
 mod seventv;
 
 use gpui::{
-    App, AppContext, Application, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
+    App, AppContext, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, FocusHandle, Focusable, GlobalElementId, InspectorElementId, KeyBinding, LayoutId,
     MouseButton, MouseUpEvent, PaintQuad, Pixels, ShapedLine, SharedString, Style, TextAlign, TextRun,
     UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions, actions, black, div, fill, hsla,
@@ -782,7 +782,7 @@ impl Render for InputExample {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    gpui_platform::application().run(|cx: &mut App| {
         cx.activate(true);
 
         cx.bind_keys([

@@ -1,9 +1,9 @@
 use crate::{CACHE_DIR, seventv::WebmEmote};
 use futures::AsyncReadExt as _;
-use futures::FutureExt;
+use futures::{FutureExt, future::Shared};
 use gpui::{
-    App, AppContext, Asset, AssetLogger, Entity, ImageAssetLoader, ImageCache, ImageCacheError, ImageCacheItem,
-    RenderImage, Resource, Window, hash, http_client::AsyncBody, http_client::HttpClient,
+    App, AppContext, Asset, AssetLogger, Entity, ImageAssetLoader, ImageCache, ImageCacheError,
+    RenderImage, Resource, Task, Window, hash, http_client::AsyncBody, http_client::HttpClient,
 };
 use reqwest_client::ReqwestClient;
 use std::fs::{self, File};
@@ -14,7 +14,7 @@ use std::{collections::HashMap, sync::Arc};
 // Cache implementation, based on the default gpui cache, but with reads/writes to disk as an
 // intermediate step between in-memory cache and loading from remote source.
 pub struct HashMapImageCache {
-    data: HashMap<u64, ImageCacheItem>,
+    data: HashMap<u64, Shared<Task<Result<Arc<RenderImage>, ImageCacheError>>>>,
     client: Arc<ReqwestClient>,
 }
 
@@ -27,9 +27,9 @@ impl HashMapImageCache {
             client: Arc::new(ReqwestClient::new()),
         });
         cx.observe_release(&e, |image_cache, cx| {
-            for (_, mut item) in std::mem::replace(&mut image_cache.data, HashMap::new()) {
-                if let Some(Ok(image)) = item.get() {
-                    cx.drop_image(image, None);
+            for (_, item) in std::mem::replace(&mut image_cache.data, HashMap::new()) {
+                if let Some(Ok(image)) = item.peek() {
+                    cx.drop_image(image.clone(), None);
                 }
             }
         })
@@ -49,7 +49,7 @@ impl HashMapImageCache {
         let hash = hash(source);
 
         if let Some(item) = self.data.get_mut(&hash) {
-            return item.get(); // will return None if still loading, I think - andrew
+            return item.peek().cloned(); // will return None if still loading, I think - andrew
         }
 
         match source {
@@ -86,7 +86,7 @@ impl HashMapImageCache {
                         .shared();
                 }
 
-                self.data.insert(hash, ImageCacheItem::Loading(task.clone()));
+                self.data.insert(hash, task.clone());
 
                 let entity = window.current_view();
                 window
@@ -104,7 +104,7 @@ impl HashMapImageCache {
             _ => {
                 let fut = AssetLogger::<ImageAssetLoader>::load(source.clone(), cx);
                 let task = cx.background_executor().spawn(fut).shared();
-                self.data.insert(hash, ImageCacheItem::Loading(task.clone()));
+                self.data.insert(hash, task.clone());
 
                 let entity = window.current_view();
                 window

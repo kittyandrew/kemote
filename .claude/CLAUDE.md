@@ -29,4 +29,4 @@ Single-binary GUI app with three source files:
 
 - **Cache location**: `~/.cache/kemote/` (or `~/.cache/dev-kemote/` in debug builds). Subdirs: `queries/` (search results as JSON, keyed by SHA-256 of query), `webm/` (downloaded WebPs, keyed by SHA-256 of URL).
 - **VERSION constant** in `main.rs:31` must stay in sync with `Cargo.toml` version.
-- GPUI is pulled from the Zed repo via git dependencies (along with `gpui_tokio`, `util`, `reqwest_client`, `http_client`).
+- GPUI is pulled from the Zed repo via git dependencies (along with `gpui_platform`, `gpui_tokio`, `util`, `reqwest_client`, `http_client`).
